@@ -13,6 +13,7 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 import net.donutsmp.spawners.util.SchedulerAdapter; //
 import net.donutsmp.spawners.util.BukkitSchedulerAdapter; //
+import java.util.UUID; //
 
 import java.io.File;
 import java.io.IOException;
@@ -32,6 +33,23 @@ public class SpawnerManager {
     private Object hopperHandle;  //
 
     private final Map<Location, Integer> hopperGuiOpenCount = new ConcurrentHashMap<>(); //For pausing
+    private final Map<Location, UUID> openGuiViewer = new ConcurrentHashMap<>(); // For tracking who has the GUI open so.
+
+    public boolean isGuiOpen(SpawnerData data) {
+        if (data == null || data.getLocation() == null) return false; return openGuiViewer.containsKey(data.getLocation());
+    }
+
+    public UUID getGuiViewer(SpawnerData data) {
+        if (data == null || data.getLocation() == null) return null; return openGuiViewer.get(data.getLocation());
+    }
+
+    public boolean trySetGuiViewer(SpawnerData data, UUID viewer) {
+        if (data == null || data.getLocation() == null || viewer == null) return false; return openGuiViewer.putIfAbsent(data.getLocation(), viewer) == null;
+    }
+
+    public void clearGuiViewer(SpawnerData data, UUID viewer) {
+        if (data == null || data.getLocation() == null) return; openGuiViewer.computeIfPresent(data.getLocation(), (loc, u) -> u.equals(viewer) ? null : u);
+    }
 
     public SpawnerManager(DonutSpawners plugin) {
         this.plugin = plugin;

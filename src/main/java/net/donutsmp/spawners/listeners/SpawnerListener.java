@@ -26,8 +26,11 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.NamespacedKey;
 import org.bukkit.persistence.PersistentDataType;
 
+import org.bukkit.event.player.PlayerQuitEvent; //
+import org.bukkit.Sound; //
 import org.bukkit.event.inventory.InventoryOpenEvent; //
 import org.bukkit.event.inventory.InventoryCloseEvent; // 
+import java.util.UUID; //
 
 import java.util.HashMap;
 import java.util.Map;
@@ -46,6 +49,9 @@ public class SpawnerListener implements Listener {
             SpawnerGUIHolder holder = (SpawnerGUIHolder) event.getInventory().getHolder();
             SpawnerData data = holder.getData();
             plugin.getSpawnerManager().pauseHopperFor(data);
+            if (event.getPlayer() instanceof Player) {
+                plugin.getSpawnerManager().trySetGuiViewer(data, ((Player) event.getPlayer()).getUniqueId());
+            }
         }
     }
     
@@ -55,7 +61,16 @@ public class SpawnerListener implements Listener {
             SpawnerGUIHolder holder = (SpawnerGUIHolder) event.getInventory().getHolder();
             SpawnerData data = holder.getData();
             plugin.getSpawnerManager().resumeHopperFor(data);
+            if (event.getPlayer() instanceof Player) {
+                plugin.getSpawnerManager().clearGuiViewer(data, ((Player) event.getPlayer()).getUniqueId());
+            }
         }
+    }
+
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        UUID uuid = event.getPlayer().getUniqueId();
+        plugin.getSpawnerManager().getSpawners().values().forEach(data -> plugin.getSpawnerManager().clearGuiViewer(data, uuid));
     }
 
     @EventHandler
@@ -149,6 +164,7 @@ public class SpawnerListener implements Listener {
 
     @EventHandler
     public void onSpawnerInteract(PlayerInteractEvent event) {
+        if (event.getHand() == org.bukkit.inventory.EquipmentSlot.OFF_HAND) return; //
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         Block block = event.getClickedBlock();
         if (block == null || block.getType() != Material.SPAWNER) return;
@@ -188,14 +204,48 @@ public class SpawnerListener implements Listener {
 
         if (existingData != null) {
             event.setCancelled(true);
-            new SpawnerGUI(plugin, existingData, false).open(player);
+            UUID current = plugin.getSpawnerManager().getGuiViewer(existingData);
+            if (current != null && !current.equals(player.getUniqueId())) {
+                player.spigot().sendMessage(
+                    ChatMessageType.ACTION_BAR,
+                    TextComponent.fromLegacyText(
+                        ChatColor.translateAlternateColorCodes('&', "&cThe spawner is currently being viewed by a player.")
+                    )
+                );
+                try {
+                    player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1.0f, 1.0f);
+                } catch (Throwable t) {
+                    try {
+                        player.playSound(player.getLocation(), Sound.valueOf("VILLAGER_NO"), 1.0f, 1.0f);
+                    } catch (Throwable ignored) {}
+                }
+                return;
+            }
+            if (current == null) {
+                if (!plugin.getSpawnerManager().trySetGuiViewer(existingData, player.getUniqueId())) {
+                    player.spigot().sendMessage(
+                        ChatMessageType.ACTION_BAR,
+                        TextComponent.fromLegacyText(
+                            ChatColor.translateAlternateColorCodes('&', "&cThe spawner is currently being viewed by a player.")
+                        )
+                    );
+                    try {
+                        player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1.0f, 1.0f);
+                    } catch (Throwable t) {
+                        try {
+                            player.playSound(player.getLocation(), Sound.valueOf("VILLAGER_NO"), 1.0f, 1.0f);
+                        } catch (Throwable ignored) {}
+                    }
+                    return;
+                }
+            } new SpawnerGUI(plugin, existingData, false).open(player);
         } else if (isVirtual) {
             event.setCancelled(true);
             CreatureSpawner cs = (CreatureSpawner) block.getState();
             try {
                 SpawnerType type = SpawnerType.valueOf(cs.getSpawnedType().name());
                 SpawnerData data = new SpawnerData(block.getLocation(), player.getUniqueId(), type, 1);
-                plugin.getSpawnerManager().addSpawner(data);
+                plugin.getSpawnerManager().trySetGuiViewer(data, player.getUniqueId()); plugin.getSpawnerManager().addSpawner(data); 
                 new SpawnerGUI(plugin, data, false).open(player);
             } catch (IllegalArgumentException ignored) {}
         }
