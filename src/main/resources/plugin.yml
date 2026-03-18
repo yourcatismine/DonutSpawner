@@ -2,7 +2,7 @@ name: DonutSpawners
 version: 1.0.0
 main: net.donutsmp.spawners.DonutSpawners
 api-version: 1.21
-soft-depends: [Essentials]
+depends: [Essentials]
 folia-supported: true
 commands:
   givespawner:
