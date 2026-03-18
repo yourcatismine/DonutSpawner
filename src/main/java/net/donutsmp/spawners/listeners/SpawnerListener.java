@@ -31,6 +31,9 @@ import org.bukkit.Sound; //
 import org.bukkit.event.inventory.InventoryOpenEvent; //
 import org.bukkit.event.inventory.InventoryCloseEvent; // 
 import java.util.UUID; //
+import org.bukkit.entity.Item;//
+import org.bukkit.Location;//
+
 
 import java.util.HashMap;
 import java.util.Map;
@@ -347,7 +350,10 @@ public class SpawnerListener implements Listener {
 
                             if (currentIndex >= startIndex) {
                                 int stackSize = (int) Math.min(remaining, 64);
-                                player.getWorld().dropItem(player.getLocation(), new ItemStack(mat, stackSize));
+                                Location eye = player.getEyeLocation();
+                                Location spawnLoc = eye.clone().add(eye.getDirection().normalize().multiply(0.5));
+                                org.bukkit.entity.Item dropped = player.getWorld().dropItem(spawnLoc, new ItemStack(mat, stackSize));
+                                dropped.setVelocity(eye.getDirection().normalize().multiply(0.35));
                                 toRemove.put(mat, toRemove.getOrDefault(mat, 0L) + stackSize);
                                 itemsDroppedOnPage++;
                             }
