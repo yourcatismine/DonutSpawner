@@ -26,6 +26,9 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.NamespacedKey;
 import org.bukkit.persistence.PersistentDataType;
 
+import org.bukkit.event.inventory.InventoryOpenEvent; //
+import org.bukkit.event.inventory.InventoryCloseEvent; // 
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -35,6 +38,24 @@ public class SpawnerListener implements Listener {
 
     public SpawnerListener(DonutSpawners plugin) {
         this.plugin = plugin;
+    }
+
+    @EventHandler
+    public void onInventoryOpen(InventoryOpenEvent event) {
+        if (event.getInventory().getHolder() instanceof SpawnerGUIHolder) {
+            SpawnerGUIHolder holder = (SpawnerGUIHolder) event.getInventory().getHolder();
+            SpawnerData data = holder.getData();
+            plugin.getSpawnerManager().pauseHopperFor(data);
+        }
+    }
+    
+    @EventHandler
+    public void onInventoryClose(InventoryCloseEvent event) {
+        if (event.getInventory().getHolder() instanceof SpawnerGUIHolder) {
+            SpawnerGUIHolder holder = (SpawnerGUIHolder) event.getInventory().getHolder();
+            SpawnerData data = holder.getData();
+            plugin.getSpawnerManager().resumeHopperFor(data);
+        }
     }
 
     @EventHandler

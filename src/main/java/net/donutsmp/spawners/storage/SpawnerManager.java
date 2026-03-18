@@ -29,7 +29,9 @@ public class SpawnerManager {
 
     private final SchedulerAdapter scheduler; //
     private Object productionHandle;  //
-    private Object hopperHandle;  // 
+    private Object hopperHandle;  //
+
+    private final Map<Location, Integer> hopperGuiOpenCount = new ConcurrentHashMap<>(); //For pausing
 
     public SpawnerManager(DonutSpawners plugin) {
         this.plugin = plugin;
@@ -112,6 +114,25 @@ public class SpawnerManager {
         } catch (IOException e) {
             plugin.getLogger().severe("Failed to save spawners.yml: " + e.getMessage());
         }
+    }
+
+    public void pauseHopperFor(SpawnerData data) {
+        if (data == null || data.getLocation() == null) return;
+        hopperGuiOpenCount.compute(data.getLocation(), (loc, count) -> count == null ? 1 : count + 1);
+    }
+    
+    public void resumeHopperFor(SpawnerData data) {
+        if (data == null || data.getLocation() == null) return;
+        hopperGuiOpenCount.computeIfPresent(data.getLocation(), (loc, count) -> {
+            if (count == null || count <= 1) return null;
+            return count - 1;
+        });
+    }
+    
+    public boolean isHopperPaused(SpawnerData data) {
+        if (data == null || data.getLocation() == null) return false;
+        Integer count = hopperGuiOpenCount.get(data.getLocation());
+        return count != null && count > 0;
     }
 
     private long parseDelayToTicks(String raw) {
