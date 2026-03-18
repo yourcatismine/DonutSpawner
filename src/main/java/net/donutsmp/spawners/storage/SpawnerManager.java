@@ -3,12 +3,16 @@ package net.donutsmp.spawners.storage;
 import net.donutsmp.spawners.DonutSpawners;
 import net.donutsmp.spawners.mob.SpawnerType;
 import net.donutsmp.spawners.tasks.ProductionTask;
+import net.donutsmp.spawners.tasks.HopperTransferTask;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+
+import net.donutsmp.spawners.util.SchedulerAdapter; //
+import net.donutsmp.spawners.util.BukkitSchedulerAdapter; //
 
 import java.io.File;
 import java.io.IOException;
@@ -23,46 +27,58 @@ public class SpawnerManager {
     private final File spawnersFile;
     private ProductionTask productionTask;
 
+    private final SchedulerAdapter scheduler; //
+    private Object productionHandle;  //
+    private Object hopperHandle;  // 
+
     public SpawnerManager(DonutSpawners plugin) {
         this.plugin = plugin;
         this.spawnersFile = new File(plugin.getDataFolder(), "spawners.yml");
+        this.scheduler = new BukkitSchedulerAdapter(plugin); //
         long autoSave = plugin.getConfig().getLong("settings.auto_save_interval", 6000L);
-        Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, () -> saveSpawners(false), autoSave, autoSave);
+        scheduler.runRepeatingAsync(() -> saveSpawners(false), autoSave, autoSave); //
     }
 
     public void loadSpawners() {
-        if (!spawnersFile.exists()) return;
-
-        FileConfiguration config = YamlConfiguration.loadConfiguration(spawnersFile);
-        for (String key : config.getKeys(false)) {
-            String[] parts = key.split(",");
-            if (parts.length != 4) continue;
-            if (Bukkit.getWorld(parts[0]) == null) {
-                plugin.getLogger().warning("World " + parts[0] + " not found for spawner " + key + ". Skipping.");
-                continue;
-            }
-            Location loc = new Location(Bukkit.getWorld(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
-
-            UUID owner = UUID.fromString(config.getString(key + ".owner"));
-            SpawnerType type = SpawnerType.fromString(config.getString(key + ".type"));
-            int stack = config.getInt(key + ".stack", 1);
-            long xp = config.getLong(key + ".xp", 0);
-            Map<Material, Long> drops = new HashMap<>();
-            if (config.contains(key + ".drops")) {
-                for (String mat : config.getConfigurationSection(key + ".drops").getKeys(false)) {
-                    drops.put(Material.valueOf(mat), config.getLong(key + ".drops." + mat));
+        if (spawnersFile.exists()) {
+            FileConfiguration config = YamlConfiguration.loadConfiguration(spawnersFile);
+            for (String key : config.getKeys(false)) {
+                String[] parts = key.split(",");
+                if (parts.length != 4) continue;
+                if (Bukkit.getWorld(parts[0]) == null) {
+                    plugin.getLogger().warning("World " + parts[0] + " not found for spawner " + key + ". Skipping.");
+                    continue;
                 }
+                Location loc = new Location(Bukkit.getWorld(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
+
+                UUID owner = UUID.fromString(config.getString(key + ".owner"));
+                SpawnerType type = SpawnerType.fromString(config.getString(key + ".type"));
+                int stack = config.getInt(key + ".stack", 1);
+                long xp = config.getLong(key + ".xp", 0);
+                Map<Material, Long> drops = new HashMap<>();
+                if (config.contains(key + ".drops")) {
+                    for (String mat : config.getConfigurationSection(key + ".drops").getKeys(false)) {
+                        drops.put(Material.valueOf(mat), config.getLong(key + ".drops." + mat));
+                    }
+                }
+                SpawnerData data = new SpawnerData(loc, owner, type);
+                data.setStackSize(stack);
+                data.setAccumulatedXP(xp);
+                data.setAccumulatedDrops(drops);
+                spawners.put(loc, data);
             }
-            SpawnerData data = new SpawnerData(loc, owner, type);
-            data.setStackSize(stack);
-            data.setAccumulatedXP(xp);
-            data.setAccumulatedDrops(drops);
-            spawners.put(loc, data);
         }
 
         productionTask = new ProductionTask(this);
         long prodInterval = plugin.getConfig().getLong("settings.production_interval", 600L);
-        productionTask.runTaskTimer(plugin, 0, prodInterval);
+        productionHandle = scheduler.runRepeatingSync(productionTask::run, 0L, prodInterval);
+
+        if (plugin.getConfig().getBoolean("hopper.enabled", false)) {
+            long checkDelayTicks = parseDelayToTicks(plugin.getConfig().getString("hopper.check_delay", "3s"));
+            int stacksPerTransfer = plugin.getConfig().getInt("hopper.stack_per_transfer", 5);
+            HopperTransferTask hopperTaskRunnable = new HopperTransferTask(this, stacksPerTransfer);
+            hopperHandle = scheduler.runRepeatingSync(hopperTaskRunnable::run, 0L, checkDelayTicks);
+        }
     }
 
     public void saveSpawners() {
@@ -70,7 +86,9 @@ public class SpawnerManager {
     }
 
     public void saveSpawners(boolean stopTask) {
-        if (stopTask && productionTask != null) productionTask.cancel();
+        if (stopTask) {
+            if (productionHandle != null) { scheduler.cancel(productionHandle); productionHandle = null; } if (hopperHandle != null) { scheduler.cancel(hopperHandle); hopperHandle = null; } //
+        }
 
         if (!spawnersFile.getParentFile().exists()) {
             spawnersFile.getParentFile().mkdirs();
@@ -94,6 +112,19 @@ public class SpawnerManager {
         } catch (IOException e) {
             plugin.getLogger().severe("Failed to save spawners.yml: " + e.getMessage());
         }
+    }
+
+    private long parseDelayToTicks(String raw) {
+        if (raw == null || raw.isEmpty()) return 60L; raw = raw.trim().toLowerCase();
+        try {
+            if (raw.endsWith("s")) {
+                long sec = Long.parseLong(raw.substring(0, raw.length()-1)); return Math.max(1, sec * 20L);
+            } else if (raw.endsWith("m")) {
+                long min = Long.parseLong(raw.substring(0, raw.length()-1)); return Math.max(1, min * 60L * 20L);
+            } else if (raw.endsWith("t")) {
+                long t = Long.parseLong(raw.substring(0, raw.length()-1)); return Math.max(1, t);
+            } else { return Math.max(1, Long.parseLong(raw)); }
+        } catch (NumberFormatException e) { return 60L; }
     }
 
     public SpawnerData getSpawner(Location loc) {
